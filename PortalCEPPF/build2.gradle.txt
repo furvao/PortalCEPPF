@@ -1,0 +1,159 @@
+apply plugin: 'java'
+apply plugin: 'eclipse-wtp'
+apply plugin: 'war'
+apply plugin: 'maven-publish'
+apply plugin: 'com.jfrog.artifactory'
+apply plugin: "jacoco"
+apply plugin: "org.sonarqube"
+
+// See http://gradle.org/docs/current/userguide/war_plugin.html
+//   Section 26.5. Convention properties
+webAppDirName = 'web'
+
+def myName = 'ManagementServer_WWW'
+
+configurations{
+       projectConfig
+       //all*.exclude group: 'org.apache.logging.log4j'
+       all{
+             resolutionStrategy.cacheChangingModulesFor 0, 'seconds'
+       }
+}
+
+war {   
+    rootSpec.exclude("**/dms-mobilesdk-5.3.0.jar")
+}
+
+dependencies {
+
+	    
+    compile fileTree(dir: 'lib', include: '*.jar')
+    
+    compile(group: 'com.datablink.core', name: 'dms-core', version: '6.1.0', changing: true)
+    compile(group: 'com.datablink.entity', name: 'dms-entitylib', version: '6.1.0', changing: true)
+    
+	// WEB SOCKET
+	providedCompile group: 'javax.websocket', name: 'javax.websocket-api', version: '1.1'
+	providedCompile group: 'javax.enterprise', name: 'cdi-api', version: '1.1'
+    
+    // JAVA REST
+    //TODO: REMOVED DUE TO ERROR NOSUCHMETHOD ON JERSEYTEST EXECUTION WITH JUNIT - CHECK IF CAN REALLY BE REMOVED
+    //compile "javax.ws.rs:jsr311-api:1.1.1"
+    
+    // JERSEY 
+	compile group: 'org.glassfish.jersey.containers', name: 'jersey-container-servlet-core', version: '2.23'
+	compile group: 'org.glassfish.jersey.core', name: 'jersey-server', version: '2.23'     
+	compile group: 'org.glassfish.jersey.containers', name: 'jersey-container-servlet', version: '2.23'
+	
+	// JACKSON
+	compile group: 'org.glassfish.jersey.media', name: 'jersey-media-json-jackson', version: '2.22.1'
+	
+	// SWAGGER
+	compile group: 'io.swagger', name: 'swagger-jersey2-jaxrs', version: '1.5.10'
+     
+    // APACHE OLTU - OAUTH2 IMPLEMENTATION
+	compile group: 'org.apache.oltu.oauth2', name: 'org.apache.oltu.oauth2.common', version: '1.0.1'    
+	compile group: 'org.apache.oltu.oauth2', name: 'org.apache.oltu.oauth2.authzserver', version: '1.0.1'
+	compile group: 'org.apache.oltu.oauth2', name: 'org.apache.oltu.oauth2.resourceserver', version: '1.0.1'
+    
+    compile group: 'org.slf4j', name: 'slf4j-api', version: '1.6.1'
+	compile group: 'org.slf4j', name: 'slf4j-log4j12', version: '1.6.1'
+	
+	// PROVIDED DEPENDENCIES
+    providedCompile ('javax.servlet:javax.servlet-api:3.1.0')
+	
+	// TEST
+	testCompile group: 'org.glassfish.jersey.test-framework', name: 'jersey-test-framework-core', version: '2.23.1'
+	testCompile group: 'org.glassfish.jersey.test-framework.providers', name: 'jersey-test-framework-provider-inmemory', version: '2.23.1'	
+	 
+	testCompile 'junit:junit:4.11'
+    testCompile 'org.hamcrest:hamcrest-all:1.3'
+    
+    
+	
+}
+
+repositories {
+    maven {
+        url "${artifactory_url}"
+        credentials {
+            username = "${artifactory_user}"
+            password = "${artifactory_password}"
+        }
+    }
+    maven {
+    	url "https://build.shibboleth.net/nexus/content/repositories/releases/"
+    }
+    mavenCentral()
+}
+    
+buildscript {
+    repositories {
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+    }
+    dependencies {
+    	classpath "org.sonarsource.scanner.gradle:sonarqube-gradle-plugin:2.0.1"
+        classpath "${artifactory_classpath}"
+    }
+}
+
+sourceCompatibility = 1.7
+targetCompatibility = 1.7
+
+task copyJars(type: Copy) {
+    from ("build/libs/ManagementServer_WWW/WEB-INF/lib")
+    into ("web/WEB-INF/lib")
+    include('*.jar')
+}
+
+task deleteJars(type: Delete) {
+    delete fileTree("/web/WEB-INF/lib") {
+        include '*.jar'
+    }
+}
+
+task unzip(type: Copy) {
+    def zipFile = file('build/libs/ManagementServer_WWW.war')
+    def outputDir = file("build/libs/ManagementServer_WWW")
+ 
+    from zipTree(zipFile)
+    into outputDir
+}
+
+copyJars.dependsOn unzip
+compileJava.dependsOn clean
+build.dependsOn deleteJars
+//build.dependsOn "sonarqube"
+build.finalizedBy copyJars
+
+assemble.dependsOn deleteJars
+//assemble.dependsOn "sonarqube"
+assemble.finalizedBy copyJars
+
+
+tasks.withType(JavaCompile) { 
+ options.encoding = "UTF-8"
+}
+
+test {
+  ignoreFailures = true
+}
+
+
+uploadArchives {
+    repositories {
+       flatDir {
+           dirs 'repos'
+       }
+    }
+}
+
+sonarqube {
+    properties {
+        property "sonar.sourceEncoding", "UTF-8"
+        property "sonar.projectName", myName
+        property "sonar.jacoco.reportPath", "${project.buildDir}/jacoco/test.exec"
+    }
+}
